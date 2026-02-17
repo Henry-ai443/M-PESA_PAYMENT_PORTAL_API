@@ -1,36 +1,47 @@
 const express = require('express');
 const router = express.Router();
-const { stkPush } = require('../config/mpesa');
+const Payment = require('../models/Payment'); // Our model
 
-// POST /api/pay
-router.post('/pay', async (req, res) => {
+// STK Push Callback Endpoint
+router.post('/stkpush/callback', async (req, res) => {
   try {
-    const { phone, amount } = req.body;
+    const callbackData = req.body.Body.stkCallback;
 
-    if (!phone || !amount) {
-      return res.status(400).json({
-        error: 'Phone number and amount are required'
+    // Check if the transaction was successful
+    if (callbackData.ResultCode === 0) {
+      const metadata = callbackData.CallbackMetadata.Item;
+
+      // Extract values from the callback
+      const amount = metadata.find(item => item.Name === 'Amount')?.Value;
+      const receiptNumber = metadata.find(item => item.Name === 'MpesaReceiptNumber')?.Value;
+      const balance = metadata.find(item => item.Name === 'Balance')?.Value || 0;
+      const transactionDate = metadata.find(item => item.Name === 'TransactionDate')?.Value;
+      const phoneNumber = metadata.find(item => item.Name === 'PhoneNumber')?.Value;
+
+      // Create a new payment record
+      const payment = new Payment({
+        merchantRequestID: callbackData.MerchantRequestID,
+        checkoutRequestID: callbackData.CheckoutRequestID,
+        amount,
+        receiptNumber,
+        balance,
+        transactionDate,
+        phoneNumber,
+        resultDesc: callbackData.ResultDesc,
       });
+
+      await payment.save();
+      console.log('Payment saved successfully:', payment);
+    } else {
+      console.log('STK Push failed:', callbackData.ResultDesc);
     }
 
-    const response = await stkPush(phone, amount);
-    return res.status(200).json(response);
-
+    // Always respond to Mpesa to acknowledge receipt
+    res.json({ ResultCode: 0, ResultDesc: 'Received successfully' });
   } catch (error) {
-    console.error('STK Push error:', error.message);
-    return res.status(500).json({
-      error: 'STK Push failed'
-    });
+    console.error('Error processing STK callback:', error);
+    res.status(500).json({ ResultCode: 1, ResultDesc: 'Internal Server Error' });
   }
-});
-
-// MPESA CALLBACK
-router.post('/mpesa/callback', (req, res) => {
-  console.log('MPESA CALLBACK RECEIVED');
-  console.log(JSON.stringify(req.body, null, 2));
-
-  // Always acknowledge Safaricom
-  res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
 });
 
 module.exports = router;
