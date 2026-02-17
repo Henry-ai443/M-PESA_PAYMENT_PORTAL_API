@@ -11,3 +11,7 @@ function generateStkPassword(shortcode, passkey) {
 }
 
 module.exports = { generateStkPassword };
+
+
+
+fz
